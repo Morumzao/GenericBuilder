@@ -17,6 +17,7 @@ public class GenericBuilder<T> {
     private int LEVEL_LIMIT = DEFAULT_LEVEL_LIMIT;
 
     private static String GLOBAL_STRING_VALUE = "text";
+    private static boolean GLOBAL_FORCE_POPULATE = true;
 
     private boolean BOOLEAN_DEFAULT = true;
     private int INT_DEFAULT = 1;
@@ -28,6 +29,7 @@ public class GenericBuilder<T> {
     private char CHAR_DEFAULT = 'c';
     private byte BYTE_DEFAULT = 1;
 
+    private boolean FORCE_POPULATE = GLOBAL_FORCE_POPULATE;
     private boolean IGNORE_OBJECTS = true;
     private boolean BUILD_LISTS = false;
 
@@ -144,6 +146,18 @@ public class GenericBuilder<T> {
         GLOBAL_STRING_VALUE = value;
     }
 
+    public static void setGlobalForcePopulate(boolean value){
+        GLOBAL_FORCE_POPULATE = value;
+    }
+
+    public GenericBuilder<T> setForcePopulate(boolean value){
+        FORCE_POPULATE = value;
+        return this;
+    }
+
+    public boolean getForcePopulate(){
+        return FORCE_POPULATE;
+    }
 
     public GenericBuilder<T> setDefaultListSize(int defaultListSize){
         DEFAULT_LIST_SIZE = defaultListSize > 0 ? defaultListSize : DEFAULT_LIST_SIZE;
@@ -155,7 +169,12 @@ public class GenericBuilder<T> {
     }
 
     private <Z> Z quickBuild(Class<Z> typeClass){
-        return new GenericBuilder<>(typeClass, level, LEVEL_LIMIT).setAllDefaults(getAllDefaults()).setDefaultListSize(defaultListSize()).getObject().build();
+        return new GenericBuilder<>(typeClass, level, LEVEL_LIMIT)
+                .setDefaultListSize(defaultListSize())
+                .setForcePopulate(getForcePopulate())
+                .setAllDefaults(getAllDefaults())
+                .getObject()
+                .build();
     }
 
     private GenericBuilder<T> setAllDefaults(Map<String, Object> defaults){
@@ -206,7 +225,36 @@ public class GenericBuilder<T> {
             return checkForType(typeClass);
         }
 
+        private <Z> Z forcePopulate(Z instance){
+            Class typeClass = instance.getClass();
+            List<Field> fields = new ArrayList<>(Arrays.asList(typeClass.getDeclaredFields()));
+            Class superClass = typeClass.getSuperclass();
+            while(superClass != null){
+                fields.addAll(Arrays.asList(superClass.getDeclaredFields()));
+                superClass = superClass.getSuperclass();
+            }
+            if (level < LEVEL_LIMIT+1) {
+                try {
+                    for (Field field : fields) {
+                        field.setAccessible(true);
+                        if(field.get(instance) == null) {
+                            field.set(instance, quickBuild(field.getType()));
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+
+            return instance;
+        }
+
         private <Z> Z populateInstance(Z instance){
+            instance = FORCE_POPULATE ? forcePopulate(instance) : softPopulate(instance);
+            return instance;
+        }
+
+        private <Z> Z softPopulate(Z instance){
 
             Class typeClass = instance.getClass();
             List<Method> setMethods = new ArrayList<>();
@@ -256,22 +304,22 @@ public class GenericBuilder<T> {
         }
 
         private Object populateParam(Parameter parameter){
-                if((parameter.getType().equals(List.class)) && BUILD_LISTS){
-                    String typeName = parameter.getAnnotatedType().getType().getTypeName();
-                    String typeParamName = typeName.split("<")[1].substring(0, typeName.split("<")[1].length()-1);
-                    try {
-                            return new GenericBuilder<>(Class.forName(typeParamName), level, LEVEL_LIMIT)
-                                .setDefaultListSize(defaultListSize())
-                                .setAllDefaults(getAllDefaults())
-                                .getObject()
-                                .buildList();
-                    } catch (Exception e){
-                        e.printStackTrace();
-                        return quickBuild(parameter.getType());
-                    }
-                } else {
+            if((parameter.getType().equals(List.class)) && BUILD_LISTS){
+                String typeName = parameter.getAnnotatedType().getType().getTypeName();
+                String typeParamName = typeName.split("<")[1].substring(0, typeName.split("<")[1].length()-1);
+                try {
+                    return new GenericBuilder<>(Class.forName(typeParamName), level, LEVEL_LIMIT)
+                            .setDefaultListSize(defaultListSize())
+                            .setAllDefaults(getAllDefaults())
+                            .getObject()
+                            .buildList();
+                } catch (Exception e){
+                    e.printStackTrace();
                     return quickBuild(parameter.getType());
                 }
+            } else {
+                return quickBuild(parameter.getType());
+            }
         }
 
         private <Z> Object populateArray(Class<Z> type){
@@ -369,8 +417,6 @@ public class GenericBuilder<T> {
             return instance;
         }
 
-
     }
 
 }
-
